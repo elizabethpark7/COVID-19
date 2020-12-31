@@ -1,0 +1,212 @@
+---
+title: "Cov 19 Analysis"
+author: "Hao Duan"
+date: "2/25/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("scatterplot3d")
+library(dplyr)
+library(readxl)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(plotly)
+library(stringi)
+library(car)
+library(gtools)
+library(readr)
+cov19 <- read_excel("COV-19.xlsx")
+```
+
+
+```{r}
+NYT0329<-read.csv("NYTimesCoronavirusArticleComments -b- 2020-03-30.csv",encoding = "UTF-8")
+NYT0329_1<-read.csv("NYTimesCoronavirusArticleComments 2020-03-30.csv",encoding = "UTF-8")
+NYT0304<-read.csv("NYTimesCoronavirusArticles 2020-03-05.csv",encoding = "UTF-8")
+```
+
+```{r}
+NYT0304<-NYT0304%>%
+  filter(userDisplayName=="The New York Times")%>%
+  select(commentBody,cleanText,articleTitle,articleDate)
+
+NYT0329<-NYT0329%>%
+  filter(userDisplayName=="The New York Times")%>%
+  select(commentBody,cleanText,articleTitle,articleDate)
+
+NYT0329_1<-NYT0329_1%>%
+  filter(userDisplayName=="The New York Times")%>%
+  select(commentBody,cleanText,articleTitle,articleDate)
+
+NYT<- rbind(NYT0304,NYT0329,NYT0329_1)
+NYT$commentBody<-as.character(NYT$commentBody)
+NYT$cleanText<-as.character(NYT$cleanText)
+
+NYT_Text<-group_by(NYT,articleTitle)%>%
+  mutate(commentBody=paste(commentBody[],collapse = " "))%>%
+  mutate(cleanText=paste(cleanText,collapse = " "))%>%
+  distinct(commentBody,.keep_all = T)%>%
+  filter(is.na(articleDate)==FALSE)
+
+NYT_Text_by_day<-NYT_Text%>%
+  group_by(articleDate)%>%
+  mutate(commentBody=paste(commentBody[],collapse = " "))%>%
+  mutate(cleanText=paste(cleanText,collapse = " "))%>%
+  distinct(commentBody,.keep_all = T)
+
+NYT_output<-NYT_Text_by_day%>%
+  select(articleDate,commentBody)
+
+NYT_output$articleDate<-as_date(NYT_output$articleDate)
+#for (i in NYT_output$articleDate){
+#  write.csv(NYT_output$commentBody[NYT_output$articleDate == i],paste(as_date(i)),row.names = FALSE)
+#}
+
+```
+
+
+```{r}
+Sentiment_0<-read.csv("NLP_SC_TXT_Sentiment CoreNLP.csv")
+Sentiment_1<-read.csv("NLP_SC_TXT 1_Sentiment CoreNLP.csv")
+Sentiment<-rbind(Sentiment_1,Sentiment_0)
+
+
+Count<-Sentiment%>%
+  group_by(Document.Name)%>%
+  count(Sentiment.label)%>%
+  spread(key= "Sentiment.label", value= "n") %>%
+  rename(very_negative = "very negative")%>%
+  rename(very_positive = "very positive")
+
+Count[is.na(Count)] <- 0
+
+Count_full <- Count%>%
+  mutate(total=negative+very_negative+very_positive+positive+neutral)%>%
+  mutate(percent = (very_negative)/total)
+
+Count_full %>%
+  group_by(Document.Name) %>%
+  ggplot(aes(x = Document.Name, y = percent)) +
+  geom_point()
+```
+
+```{r}
+ANEW<-read.csv("/Users/elizabethpark/Desktop/Data\ Analysis/ANEW/all.csv",encoding = "UTF-8")
+Sentiment_Mean_By_Date<-ANEW%>%
+  group_by(filename)%>%
+  summarise(Sentiment_Mean = mean(Sentiment_Mean,na.rm = T))
+
+Sentiment_Mean_By_Date$filename<-as.character(Sentiment_Mean_By_Date$filename)
+Sentiment_Mean_By_Date<-Sentiment_Mean_By_Date%>%
+  mutate(Date = as_date(substr(filename,1,10)))%>%
+  select(Date, Sentiment_Mean)
+
+
+  ggplot(Sentiment_Mean_By_Date, aes(x=Date, y=Sentiment_Mean))+
+  geom_line()
+
+
+
+
+```
+
+```{r}
+weekdays<-cov19%>%
+  filter(Day!="Sat" & Day!="Sun")%>%
+  filter(Date!=as.Date("2020-02-12"))
+
+weekends<-cov19%>%
+  filter(Day =="Sat" | Day=="Sun")
+
+cov19_data<-cov19%>%
+  filter(Date!=as.Date("2020-02-12"))%>%
+  mutate(is_weekend=ifelse(Day =="Sat"|Day == "Sun", "yes", "no"))
+```
+
+
+```{r}
+model_1 <- lm(Total~Daily_Case + Daily_Case_OC, weekdays)
+summary(model_1)
+
+model_2 <- lm(Total~Daily_Case + Daily_Case_OC, weekends)
+summary(model_2)
+```
+
+
+```{r}
+ggplot(weekdays, aes(x = Daily_Case, y = Total)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = F)
+  
+
+ggplot(weekends, aes(x = Daily_Case, y = Total)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = F)
+
+
+p<-ggplot(cov19_data,aes(x = Daily_Case, y = Total,col=is_weekend))+
+  geom_point(aes(text=paste("Date:", Date))) +
+  geom_smooth(method = 'lm', se = F)
+ggplotly(p)
+
+
+plot_ly(weekdays,x=~Date,y=~Daily_Case,type="scatter",name = "Daily Case", mode="lines+markers")%>%
+  add_trace(y = ~Total , name = "Total News", mode = "lines+markers")%>%
+  add_trace(y = ~Daily_Case_OC , name = "Daily Case(Outside China)", mode = "lines+markers")%>%
+  layout(xaxis=list(title ="Date"),yaxis=list(title="# of"))
+  
+```
+
+```{r}
+ggplot(weekdays, aes(x = Daily_Case, y = Weblinks)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = TRUE)
+
+ggplot(weekends, aes(x = Daily_Case, y = Weblinks)) +
+  geom_point() +
+  geom_smooth(method = 'lm', se = TRUE)
+
+
+qplot(Daily_Case,Weblinks,geom = c("point","smooth"), method="lm", formula=y~x, color=is_weekend,data=cov19_data)
+
+plot_ly(weekdays,x=~Date,y=~Daily_Case,type="scatter",name = "Daily Case", mode="lines+markers")%>%
+  add_trace(y = ~Weblinks , name = "Weblink News", mode = "lines+markers")%>%
+  add_trace(y = ~Daily_Case_OC , name = "Daily Case(Outside China)", mode = "lines+markers")%>%
+  add_trace(y = ~Daily_Case-Daily_Case_OC , name = "Daily Case(China)", mode = "lines+markers")%>%
+  layout(xaxis=list(title ="Date"),yaxis=list(title="# of"))
+
+
+```
+
+
+```{r}
+colors <- c("steelblue", "#E69F00")
+colors <- colors[as.numeric(as.factor(cov19_data$is_weekend))]
+
+p_1<-scatterplot3d(cov19_data$Daily_Case,cov19_data$Daily_Case_OC,cov19_data$Total/1000,angle = 90,
+              main="Regression Model of Daily Patient Case and Number of News Reported",
+              xlab = "Daily Case in Total",
+              ylab = "Daily Case Outside China",
+              zlab = "Total # of News Reports (K)",
+              pch = 16, color=colors)
+p_1$plane3d(lm(weekdays$Total/1000 ~ weekdays$Daily_Case + weekdays$Daily_Case_OC), col = "steelblue",lty.box = "solid")
+p_1$plane3d(lm(weekends$Total/1000 ~ weekends$Daily_Case + weekends$Daily_Case_OC), col = "#E69F00",lty.box = "solid")
+legend(p_1$xyz.convert(6000,700,12), col = c("steelblue", "#E69F00"),legend = c("Weekdays","Weekends"), pch = 16)
+```
+
+```{r}
+cor.test(weekdays$Daily_Case, weekdays$Total, method=c("pearson"))
+cor.test(weekdays$Daily_Case_OC, weekdays$Total, method=c("pearson"))
+cor.test(weekdays$Daily_Death, weekdays$Total, method=c("pearson"))
+
+cor.test(cov19$Daily_Case, cov19$Total, method=c("pearson"))
+cor.test(cov19$Daily_Case_OC, cov19$Total, method=c("pearson"))
+cor.test(cov19$Daily_Death, cov19$Total, method=c("pearson"))
+cor.test(cov19$Daily_Recovery, cov19$Total, method=c("pearson"))
+```
+
+
+
